@@ -1,37 +1,60 @@
 package main
 
+
+
 import (
- "net/http"
+	"log"
+	"net/http"
+	
+	//"encoding/json"
+	"github.com/go-chi/chi/v5"
+	"github.com/aakash1408/chirpy/database"
+	
 )
 
-func main(){
+type apiConfig struct {
+	fileserverHits int
+	DB             *database.DB
+}
+
+func main() {
+	const filepathRoot = "."
 	const port = "8080"
 
-	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir(".")))
-	//corsMux := middlewareCors(mux)
-	
-	srv := &http.Server{
-		Addr: ":" + port,
-		Handler: mux,
+	db, err := database.NewDB("database.json")
+	if err != nil {
+		log.Fatal(err)
 	}
-	
-	srv.ListenAndServe()
+
+	apiCfg := apiConfig{
+		fileserverHits: 0,
+		DB:             db,
+	}
+
+	router := chi.NewRouter()
+	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
+	router.Handle("/app", fsHandler)
+	router.Handle("/app/*", fsHandler)
+
+	apiRouter := chi.NewRouter()
+	apiRouter.Get("/healthz", handlerReadiness)
+	apiRouter.Post("/chirps", apiCfg.handlerChirpsCreate)
+	apiRouter.Get("/chirps", apiCfg.handlerChirpsRetrieve)
+	router.Mount("/api", apiRouter)
+
+	adminRouter := chi.NewRouter()
+	adminRouter.Get("/metrics", apiCfg.handlerMetrics)
+	router.Mount("/admin", adminRouter)
+
+	corsMux := middlewareCors(router)
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: corsMux,
+	}
+
+	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
+	log.Fatal(srv.ListenAndServe())
 }
-
-func middlewareCors(next http.Handler)http.Handler{
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
-		w.Header().Set("Access-Control-Allow-Origin","*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		if r.Method == "OPTIONS"{
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		next.ServeHTTP(w,r)
-	})
-}
-
-
 
 
